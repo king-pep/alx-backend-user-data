@@ -1,10 +1,32 @@
 #!/usr/bin/env python3
-""" Use of regex in replacing occurrences of certain field values """
-import re
-from typing import List
+""" Personal data.
+"""
 import logging
 import mysql.connector
+import re
 import os
+from typing import List
+
+PII_FIELDS = ("name", "email", "phone", "ssn", "password")
+
+
+def filter_datum(fields: List[str], redaction: str,
+                 message: str, separator: str) -> str:
+    """ Function to hide personal data.
+        Args:
+            fields: a list of strings.
+            redaction: a string representing by what the
+                       field will be obfuscated.
+            message: a string representing the log line.
+            separator: a string representing by which character
+                       is separating all fields in the log line.
+        Return:
+            The log message obfuscated.
+    """
+    for i in fields:
+        message = re.sub(r"{}=(.*?){}".format(i, separator),
+                         f'{i}={redaction}{separator}', message)
+    return message
 
 
 class RedactingFormatter(logging.Formatter):
@@ -16,75 +38,58 @@ class RedactingFormatter(logging.Formatter):
     SEPARATOR = ";"
 
     def __init__(self, fields: List[str]):
+        """ Initializer.
+            Arg:
+                fields: a list of strings.
+        """
         super(RedactingFormatter, self).__init__(self.FORMAT)
         self.fields = fields
 
     def format(self, record: logging.LogRecord) -> str:
-        """ Returns filtered values from log records """
+        """ Format method.
+            Arg:
+                record: records of filter_datum function.
+        """
         return filter_datum(self.fields, self.REDACTION,
                             super().format(record), self.SEPARATOR)
 
 
-PII_FIELDS = ("name", "email", "password", "ssn", "phone")
-
-
-def get_db() -> mysql.connector.connection.MYSQLConnection:
-    """ Connection to MySQL environment """
-    db_connect = mysql.connector.connect(
-        user=os.getenv('PERSONAL_DATA_DB_USERNAME', 'root'),
-        password=os.getenv('PERSONAL_DATA_DB_PASSWORD', ''),
-        host=os.getenv('PERSONAL_DATA_DB_HOST', 'localhost'),
-        database=os.getenv('PERSONAL_DATA_DB_NAME')
-    )
-    return db_connect
-
-
-def filter_datum(fields: List[str], redaction: str, message: str,
-                 separator: str) -> str:
-    """ Returns regex obfuscated log messages """
-    for field in fields:
-        message = re.sub(f'{field}=(.*?){separator}',
-                         f'{field}={redaction}{separator}', message)
-    return message
-
-
 def get_logger() -> logging.Logger:
-    """ Returns a logging.Logger object """
-    logger = logging.getLogger("user_data")
+    """ Function that stock log(logger), logger information gathering(handler)
+        and formatted forwarding(formatter).
+    """
+    logger = logging.getLogger('user_data')
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    handler = logging.StreamHandler()
+    formatter = RedactingFormatter(fields=PII_FIELDS)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
-    target_handler = logging.StreamHandler()
-    target_handler.setLevel(logging.INFO)
-
-    formatter = RedactingFormatter(list(PII_FIELDS))
-    target_handle.setFormatter(formatter)
-
-    logger.addHandler(target_handler)
     return logger
 
 
-def main() -> None:
-    """ Obtain database connection using get_db
-    retrieve all role in the users table and display
-    each row under a filtered format
+def get_db() -> mysql.connector.connection.MySQLConnection:
+    """ Function that connect to secure database.
+        Return:
+            A connector to the database.
+    """
+    return mysql.connector.connect(
+        host=os.getenv('PERSONAL_DATA_DB_HOST'),
+        database=os.getenv('PERSONAL_DATA_DB_NAME'),
+        user=os.getenv('PERSONAL_DATA_DB_USERNAME'),
+        password=os.getenv('PERSONAL_DATA_DB_PASSWORD')
+    )
+
+
+def main():
+    """ Function that database connection using get_db and
+        retrieve all rows in the users table.
     """
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT * FROM users;")
 
-    headers = [field[0] for field in cursor.description]
-    logger = get_logger()
 
-    for row in cursor:
-        info_answer = ''
-        for f, p in zip(row, headers):
-            info_answer += f'{p}={(f)}; '
-        logger.info(info_answer)
-
-    cursor.close()
-    db.close()
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
